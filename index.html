@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lunch Management</title>
+<meta name="description" content="Office lunch booking, menus, and billing.">
+<meta name="theme-color" content="#E8A324">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lunch">
+
+<link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+<link rel="alternate icon" href="icons/favicon.ico">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+<div id="app-root">
+
+  <!-- ===================== AUTH SHELL ===================== -->
+  <section id="view-auth" class="auth-shell hidden">
+    <svg class="auth-blobs" viewBox="0 0 800 800" aria-hidden="true" preserveAspectRatio="xMidYMid slice">
+      <circle cx="120" cy="120" r="260" fill="var(--turmeric)" opacity="0.16"/>
+      <circle cx="700" cy="680" r="300" fill="var(--tamarind)" opacity="0.14"/>
+      <circle cx="650" cy="140" r="150" fill="var(--chili)" opacity="0.10"/>
+    </svg>
+    <div class="auth-wrap">
+      <div class="auth-brand">
+        <span class="brand-mark brand-mark--lg" aria-hidden="true"></span>
+        <h1 id="auth-org-name">Lunch Management</h1>
+        <p class="muted">Book your lunch. See your bill. Skip the guesswork.</p>
+      </div>
+      <div class="auth-card" id="auth-card"></div>
+    </div>
+  </section>
+
+  <!-- ===================== APP SHELL ===================== -->
+  <div id="view-app" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar__brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name" id="sidebar-org-name">Lunch</span>
+      </div>
+      <nav class="sidebar__nav" id="sidebar-nav"></nav>
+      <div class="sidebar__footer">
+        <button class="icon-btn" id="theme-toggle-side" aria-label="Toggle theme"><i data-lucide="sun-moon"></i></button>
+      </div>
+    </aside>
+
+    <header class="topbar" id="topbar"></header>
+
+    <main class="content">
+      <div class="content__inner">
+        <section id="page-home" class="page hidden"></section>
+        <section id="page-bills" class="page hidden"></section>
+        <section id="page-admin" class="page hidden"></section>
+        <section id="page-account" class="page hidden"></section>
+      </div>
+    </main>
+
+    <nav class="bottom-nav" id="bottom-nav"></nav>
+  </div>
+
+</div>
+
+<div id="print-root" class="print-root" aria-hidden="true"></div>
+<div id="modal-root"></div>
+
+<script src="https://unpkg.com/lucide@0.383.0/dist/umd/lucide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/home.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/bills.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
