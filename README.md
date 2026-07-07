@@ -55,9 +55,10 @@ response is `{ ok: true, data }` or `{ ok: false, error }`.
    - The first time you run any Apps Script action, Google will ask you to
      authorize permissions (Sheets, Drive, Mail, Script). This is expected —
      approve it under your own account.
-   - It creates all 8 sheets with headers, seeds default settings and a
-     blank weekly menu, and — since no admin exists yet — prompts you for
-     an admin name/email/password right there in the dialog.
+   - It creates all 8 sheets with headers, seeds default settings, and —
+     since no admin exists yet — prompts you for an admin name/email/password
+     right there in the dialog. There's no menu to seed anymore: you fill
+     each date in directly under Admin → Menu & Pricing (see below).
 5. **Deploy → New deployment → type: Web app.**
    - Execute as: **Me**
    - Who has access: **Anyone**  ← important: not "Anyone with Google
@@ -93,7 +94,11 @@ response is `{ ok: true, data }` or `{ ok: false, error }`.
 Log in with the admin email/password you created during setup, then:
 1. **Admin → Settings** — confirm weekly holidays, cutoff hours, lunch
    service time, currency symbol, and the latest bookable date.
-2. **Admin → Menu & Pricing** — fill in each weekday's menu and price.
+2. **Admin → Menu & Pricing** — pick the month and fill in the menu + price
+   for each date (price can, and usually will, differ day to day — there's
+   no fixed weekly rate). Weekly-holiday dates are skipped automatically.
+   Tick "One-off" to mark a specific date (e.g. Eid) as a holiday even
+   though its weekday isn't normally one.
 3. **Admin → Approvals** — approve real employees as they register.
 4. Change the admin password from the account menu (top-right avatar).
 
@@ -105,8 +110,12 @@ Every date has one computed status, calculated identically on the server
 (`OrderService.gs → computeDayInfo`) and mirrored in demo mode
 (`api.js → computeDayInfoDemo`) — the UI never guesses independently:
 
-- **Holiday** — the weekday is in "Weekly holidays", or a date override
-  marks that specific date as a holiday. Always locked, never editable.
+- **Holiday** — the weekday is in "Weekly holidays", or that specific date
+  is ticked "One-off" holiday. Always locked, never editable.
+- **No menu published** — if a date has no menu/price entered at all, it
+  locks automatically (reason `no-menu`). This exists so a day nobody has
+  filled in yet can never be booked at a phantom ৳0 — it's a safeguard, not
+  something you need to configure.
 - **Cutoff** — a deadline is computed per date as
   `(that date's Lunch Service Time) − Cutoff Hours`. Past the deadline,
   the date locks — this is what makes "today" lock automatically once
@@ -116,12 +125,13 @@ Every date has one computed status, calculated identically on the server
   you're ready to open it.
 
 Prices are **snapshotted onto the order** at booking time, so changing a
-weekday's price later never rewrites historical bills.
+date's price later never rewrites historical bills.
 
-Menu resolution per date: **date override → weekly template → (nothing)**.
-Use overrides for one-off menu changes, special-event pricing, or ad-hoc
-holidays (e.g., Eid, a national holiday) without touching the weekly
-template.
+There is no weekly recurring menu — every calendar date is its own row in
+the `DateOverrides` sheet, filled in a month at a time from Admin → Menu &
+Pricing. That sheet name is a historical artifact of an earlier revision;
+it is now the single source of menu/price/holiday data, not an "override"
+of anything else.
 
 ---
 
@@ -170,8 +180,8 @@ regenerate them with any icon tool if you want a different mark.
 
 | Area | Included |
 |---|---|
-| Admin | weekly holidays, per-weekday menu + price, date overrides/extra holidays, cutoff hours, lunch service time, booking-window limit, approve/reject/suspend users, print day's orders (custom heading + signature lines) |
-| Home | month calendar, book/cancel with live lock state, past/holiday/cutoff-locked days shown with a lock, animated "stamp" on booking, per-day and monthly totals, menu-per-day |
+| Admin | weekly holidays, per-**date** menu + price (a full month at a time), one-off holiday marking, cutoff hours, lunch service time, booking-window limit, approve/reject/suspend users, print day's orders (custom heading + signature lines) |
+| Home | today's menu shown up top (book/cancel right there), month calendar, book/cancel with live lock state, past/holiday/no-menu/cutoff-locked days shown with a lock, animated "stamp" on booking, per-day and monthly totals |
 | Bills | user: monthly total/paid/due, per-day breakdown, submit payment (bKash/Nagad/Rocket/Bank/Cash/Other + optional proof screenshot), status once verified; admin: user-wise & day-wise tables with print, payment verification queue, paid-vs-due charts |
 | Accounts | register (employee ID, name, email, phone, modality) → email OTP verification → admin approval → email+password login, forgot/reset password, change password |
 | Shell | responsive mobile→desktop, bottom nav on small screens / sidebar on large, light & dark mode, PWA-style icons/manifest |
@@ -208,3 +218,34 @@ to build any of them next if you want them.
 - **Times look off by a few hours** → confirm the Apps Script project's
   timezone is `Asia/Dhaka` (Project Settings → General settings), matching
   `appsscript.json`.
+
+---
+
+## 10. Changelog
+
+**Revision 2** (this version):
+- Pricing is now **per-date**, not a weekly recurring rate — Admin → Menu
+  & Pricing is a month grid, one row per calendar day, saved in one request.
+- Calendar cells no longer show price (it varies per day now); a **Today's
+  Menu** card sits above the grid instead, with its own book/cancel action.
+- Fixed a real bug: booking lunch could show "Unknown action: add". A
+  request-body field was accidentally named `action` in two different
+  places at once (the API's routing key, and the book/cancel flag) and one
+  silently overwrote the other. The book/cancel field is now called
+  `intent`, and `js/api.js` also applies `action`/`token` last when
+  building a request so this class of collision can't recur.
+- Registering again with an email that's registered but never verified no
+  longer dead-ends on "already registered" — it refreshes the pending
+  registration and sends a fresh code. A **"Verify email"** link on the
+  login screen also gives a path back to verification any time, even
+  days later, without needing to remember to do it right away.
+- Fixed a mobile layout bug where the month label could force the whole
+  page wider than the viewport (needing a horizontal swipe to see Friday/
+  Saturday) — a classic flexbox min-width issue, now constrained to
+  truncate instead.
+- Home now uses a two-column layout on laptop/desktop (calendar + legend on
+  the left, Today's Menu pinned on the right) instead of stacking
+  everything in one column, so it fits without a vertical scroll on most
+  screens.
+- Added spacing below a couple of buttons that sat flush against the next
+  card (Submit Payment, Save Settings).
