@@ -24,6 +24,7 @@ function tplLogin() {
     </form>
     <div class="auth-links">
       <a href="#" id="go-forgot">Forgot password?</a>
+      <a href="#" id="go-verify">Verify email</a>
       <a href="#" id="go-register">Create an account</a>
     </div>`;
 }
@@ -53,8 +54,9 @@ function tplRegister() {
 function tplVerify() {
   return `
     <h2>Verify your email</h2>
-    <p class="muted">We sent a 6-digit code to <strong>${escapeHtml(AuthState.pendingEmail)}</strong>.</p>
+    <p class="muted">Enter the 6-digit code we emailed you. If it's been a while or you lost it, just resend.</p>
     <form id="form-verify" novalidate>
+      <div class="field"><label>Email</label><input type="email" id="vf-email" value="${escapeHtml(AuthState.pendingEmail)}" autocomplete="email" required></div>
       <div class="field"><label>Verification code</label><input id="vf-otp" inputmode="numeric" maxlength="6" required></div>
       <button class="btn btn--primary btn--full" type="submit"><i data-lucide="shield-check"></i> Verify</button>
     </form>
@@ -88,6 +90,7 @@ function wireAuth(panel) {
   if (panel === 'login') {
     qs('#go-register').addEventListener('click', e => { e.preventDefault(); renderAuth('register'); });
     qs('#go-forgot').addEventListener('click', e => { e.preventDefault(); renderAuth('forgot'); });
+    qs('#go-verify').addEventListener('click', e => { e.preventDefault(); renderAuth('verify'); });
     qs('#form-login').addEventListener('submit', async e => {
       e.preventDefault();
       const btn = e.target.querySelector('button');
@@ -130,7 +133,10 @@ function wireAuth(panel) {
     qs('#go-login-2').addEventListener('click', e => { e.preventDefault(); renderAuth('login'); });
     qs('#go-resend').addEventListener('click', async e => {
       e.preventDefault();
-      try { await apiCall('resendOtp', { email: AuthState.pendingEmail }); showToast('Code resent.', 'success'); }
+      const email = qs('#vf-email').value.trim();
+      if (!email) return showToast('Enter your email first.', 'error');
+      AuthState.pendingEmail = email;
+      try { await apiCall('resendOtp', { email }); showToast('Code resent.', 'success'); }
       catch (err) { apiErrorToast(err); }
     });
     qs('#form-verify').addEventListener('submit', async e => {
@@ -138,7 +144,9 @@ function wireAuth(panel) {
       const btn = e.target.querySelector('button');
       setBusy(btn, true);
       try {
-        await apiCall('verifyOtp', { email: AuthState.pendingEmail, otp: qs('#vf-otp').value.trim() });
+        const email = qs('#vf-email').value.trim();
+        await apiCall('verifyOtp', { email, otp: qs('#vf-otp').value.trim() });
+        AuthState.pendingEmail = email;
         showToast('Email verified — awaiting admin approval.', 'success');
         renderAuth('login');
       } catch (err) { apiErrorToast(err); } finally { setBusy(btn, false); }

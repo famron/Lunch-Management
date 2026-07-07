@@ -1,6 +1,6 @@
 /* admin.js — everything under the Admin tab */
 
-const AdminState = { section: 'settings', overridesMonth: null };
+const AdminState = { section: 'settings', menuMonth: null };
 const AdminUsersState = { filter: 'PendingApproval' };
 
 const ADMIN_SECTIONS = [
@@ -58,7 +58,7 @@ async function renderSettingsSection() {
       <div class="field"><label>Latest bookable date</label><input type="date" id="st-maxdate" value="${escapeHtml(settings.MaxBookableDate || '')}"></div>
       <p class="muted">Keep this at the end of the current month to keep next month closed; move it forward whenever you're ready to open new bookings.</p>
     </div>
-    <button class="btn btn--primary" id="st-save"><i data-lucide="save"></i> Save settings</button>`;
+    <button class="btn btn--primary section-action" id="st-save"><i data-lucide="save"></i> Save settings</button>`;
   paintIcons();
 
   qsa('#st-holidays .chip').forEach(c => c.addEventListener('click', () => c.classList.toggle('is-active')));
@@ -79,115 +79,95 @@ async function renderSettingsSection() {
 }
 
 /* ------------------------------------------------------- Menu & Pricing */
+// Price and menu vary day to day (no weekly recurring template) — the admin
+// fills in every date of the month in one grid and saves it in one request.
 
 async function renderMenuSection() {
-  if (!AdminState.overridesMonth) { const n = new Date(); AdminState.overridesMonth = monthKey(n.getFullYear(), n.getMonth()); }
-  let template;
-  try { ({ template } = await apiCall('adminGetMenuTemplate', {})); } catch (e) { return apiErrorToast(e); }
+  if (!AdminState.menuMonth) { const n = new Date(); AdminState.menuMonth = monthKey(n.getFullYear(), n.getMonth()); }
 
   qs('#admin-section-body').innerHTML = `
     <div class="card form-card">
-      <h3 style="margin-top:0">Weekly menu & price</h3>
-      <p class="muted">The default menu for each weekday. Use date overrides below for one-off changes or extra holidays.</p>
-      <div class="table-scroll">
-        <table class="edit-table">
-          <thead><tr><th>Day</th><th>Menu</th><th>Price</th></tr></thead>
-          <tbody id="menu-template-rows">
-            ${template.map(t => `<tr data-day="${t.day}">
-              <td>${t.day}</td>
-              <td><input class="mt-menu" value="${escapeHtml(t.menuText)}"></td>
-              <td><input class="mt-price" type="number" min="0" value="${t.price}"></td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <button class="btn btn--primary" id="menu-save"><i data-lucide="save"></i> Save weekly menu</button>
-    </div>
-    <div class="card form-card">
-      <div class="row-between"><h3 style="margin:0">Date overrides & extra holidays</h3>
-        <button class="btn btn--secondary btn--sm" id="override-add"><i data-lucide="plus"></i> Add</button>
-      </div>
+      <h3 style="margin-top:0">Monthly menu & pricing</h3>
+      <p class="muted">Set the menu and price for each day of the month — this is what users see and book against. Weekly-holiday rows are locked automatically and don't need an entry.</p>
       <div class="month-bar month-bar--compact">
-        <button class="icon-btn" id="ov-prev" aria-label="Previous month"><i data-lucide="chevron-left"></i></button>
-        <span id="ov-month-label"></span>
-        <button class="icon-btn" id="ov-next" aria-label="Next month"><i data-lucide="chevron-right"></i></button>
+        <button class="icon-btn" id="mm-prev" aria-label="Previous month"><i data-lucide="chevron-left"></i></button>
+        <span id="mm-month-label"></span>
+        <button class="icon-btn" id="mm-next" aria-label="Next month"><i data-lucide="chevron-right"></i></button>
       </div>
-      <div id="override-list"></div>
+      <div class="table-scroll">
+        <table class="edit-table" id="mm-table"></table>
+      </div>
+      <button class="btn btn--primary section-action" id="mm-save"><i data-lucide="save"></i> Save month</button>
     </div>`;
   paintIcons();
 
-  qs('#menu-save').addEventListener('click', saveMenuTemplate);
-  qs('#override-add').addEventListener('click', () => openOverrideModal(null));
-  qs('#ov-prev').addEventListener('click', () => shiftOverridesMonth(-1));
-  qs('#ov-next').addEventListener('click', () => shiftOverridesMonth(1));
-  await loadOverridesForMonth();
+  qs('#mm-prev').addEventListener('click', () => shiftMenuMonth(-1));
+  qs('#mm-next').addEventListener('click', () => shiftMenuMonth(1));
+  qs('#mm-save').addEventListener('click', saveMenuMonth);
+  await loadMenuMonth();
 }
 
-async function saveMenuTemplate() {
-  const rows = qsa('#menu-template-rows tr');
-  const template = rows.map(r => ({ day: r.dataset.day, menuText: r.querySelector('.mt-menu').value.trim(), price: Number(r.querySelector('.mt-price').value) || 0 }));
-  try { await apiCall('adminSaveMenuTemplate', { template }); showToast('Weekly menu saved.', 'success'); } catch (e) { apiErrorToast(e); }
-}
-
-function shiftOverridesMonth(delta) {
-  const [y, m] = AdminState.overridesMonth.split('-').map(Number);
+function shiftMenuMonth(delta) {
+  const [y, m] = AdminState.menuMonth.split('-').map(Number);
   const d = new Date(y, (m - 1) + delta, 1);
-  AdminState.overridesMonth = monthKey(d.getFullYear(), d.getMonth());
-  loadOverridesForMonth();
+  AdminState.menuMonth = monthKey(d.getFullYear(), d.getMonth());
+  loadMenuMonth();
 }
 
-let _overridesCache = [];
-async function loadOverridesForMonth() {
-  const [y, m] = AdminState.overridesMonth.split('-').map(Number);
-  qs('#ov-month-label').textContent = monthLabel(y, m - 1);
+async function loadMenuMonth() {
+  const [y, m] = AdminState.menuMonth.split('-').map(Number);
+  qs('#mm-month-label').textContent = monthLabel(y, m - 1);
   const start = fmtDate(new Date(y, m - 1, 1));
   const end = fmtDate(new Date(y, m, 0));
+
   try {
-    const { overrides } = await apiCall('adminGetDateOverrides', { startDate: start, endDate: end });
-    _overridesCache = overrides;
-    const list = qs('#override-list');
-    if (!overrides.length) { list.innerHTML = '<p class="muted">No overrides this month.</p>'; return; }
-    list.innerHTML = overrides.slice().sort((a, b) => a.date < b.date ? -1 : 1).map(o => `
-      <button type="button" class="override-row" data-date="${o.date}">
-        <span class="override-row__date">${niceDate(o.date)}</span>
-        <span class="override-row__info">${o.isHoliday ? '<span class="badge badge--holiday">Holiday</span>' : ''} ${escapeHtml(o.menuText || '')}${o.price != null ? ' · ' + money(o.price) : ''}</span>
-        <i data-lucide="chevron-right"></i>
-      </button>`).join('');
-    paintIcons();
-    qsa('.override-row').forEach(row => row.addEventListener('click', () => {
-      openOverrideModal(_overridesCache.find(x => x.date === row.dataset.date));
-    }));
+    const [{ settings }, { overrides }] = await Promise.all([
+      apiCall('adminGetSettings', {}),
+      apiCall('adminGetDateOverrides', { startDate: start, endDate: end })
+    ]);
+    const weeklyHolidays = String(settings.WeeklyHolidays || '').split(',').map(s => s.trim()).filter(Boolean);
+    const byDate = {};
+    overrides.forEach(o => byDate[o.date] = o);
+
+    const daysInMonth = new Date(y, m, 0).getDate();
+    let rows = '';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateObj = new Date(y, m - 1, d);
+      const dateStr = fmtDate(dateObj);
+      const wd = WEEKDAYS[dateObj.getDay()];
+      const entry = byDate[dateStr] || {};
+      if (weeklyHolidays.indexOf(wd) !== -1) {
+        rows += `<tr class="mm-row mm-row--holiday" data-date="${dateStr}">
+          <td>${d} <span class="muted">${WEEKDAYS_SHORT[dateObj.getDay()]}</span></td>
+          <td colspan="2" class="muted">Weekly holiday — no entry needed</td>
+        </tr>`;
+      } else {
+        rows += `<tr class="mm-row" data-date="${dateStr}">
+          <td>${d} <span class="muted">${WEEKDAYS_SHORT[dateObj.getDay()]}</span></td>
+          <td><input class="mm-menu" value="${escapeHtml(entry.menuText || '')}" placeholder="e.g. Chicken Biryani"></td>
+          <td><input class="mm-price" type="number" min="0" value="${entry.price != null ? entry.price : ''}" placeholder="0"></td>
+          <td><label class="mm-holiday-label"><input type="checkbox" class="mm-holiday" ${entry.isHoliday ? 'checked' : ''}> Holiday</label></td>
+        </tr>`;
+      }
+    }
+    qs('#mm-table').innerHTML = `<thead><tr><th>Date</th><th>Menu</th><th>Price</th><th>One-off</th></tr></thead><tbody>${rows}</tbody>`;
   } catch (e) { apiErrorToast(e); }
 }
 
-function openOverrideModal(existing) {
-  openModal({
-    title: existing ? 'Edit override — ' + niceDate(existing.date) : 'Add date override',
-    bodyHtml: `
-      <div class="field"><label>Date</label><input type="date" id="ov-date" value="${existing ? existing.date : ''}" ${existing ? 'disabled' : ''}></div>
-      <div class="field"><label>Menu text <span class="muted">(blank keeps the weekly default)</span></label><input id="ov-menu" value="${escapeHtml(existing ? existing.menuText : '')}"></div>
-      <div class="field"><label>Price <span class="muted">(blank keeps the weekly default)</span></label><input type="number" min="0" id="ov-price" value="${existing && existing.price != null ? existing.price : ''}"></div>
-      <label class="checkbox-row"><input type="checkbox" id="ov-holiday" ${existing && existing.isHoliday ? 'checked' : ''}> Mark as holiday (blocks booking that day)</label>
-      <div class="field"><label>Note <span class="muted">(admin-only)</span></label><input id="ov-note" value="${escapeHtml(existing ? existing.note : '')}"></div>
-      <div class="modal-actions">
-        ${existing ? '<button class="btn btn--danger" id="ov-delete"><i data-lucide="trash-2"></i> Remove</button>' : '<span></span>'}
-        <button class="btn btn--primary" id="ov-save"><i data-lucide="save"></i> Save</button>
-      </div>`
-  });
-  qs('#ov-save').addEventListener('click', async (e) => {
-    const btn = e.currentTarget; setBusy(btn, true);
-    try {
-      await apiCall('adminSaveDateOverride', {
-        date: qs('#ov-date').value, menuText: qs('#ov-menu').value.trim(),
-        price: qs('#ov-price').value, isHoliday: qs('#ov-holiday').checked, note: qs('#ov-note').value.trim()
-      });
-      closeModal(); showToast('Override saved.', 'success'); loadOverridesForMonth();
-    } catch (err) { apiErrorToast(err); setBusy(btn, false); }
-  });
-  if (existing) qs('#ov-delete').addEventListener('click', async () => {
-    try { await apiCall('adminDeleteDateOverride', { date: existing.date }); closeModal(); showToast('Override removed.', 'info'); loadOverridesForMonth(); }
-    catch (err) { apiErrorToast(err); }
-  });
+async function saveMenuMonth() {
+  const rows = qsa('#mm-table tr.mm-row:not(.mm-row--holiday)');
+  const days = rows.map(r => ({
+    date: r.dataset.date,
+    menuText: r.querySelector('.mm-menu').value.trim(),
+    price: r.querySelector('.mm-price').value === '' ? null : Number(r.querySelector('.mm-price').value),
+    isHoliday: r.querySelector('.mm-holiday').checked
+  }));
+  const btn = qs('#mm-save');
+  setBusy(btn, true);
+  try {
+    await apiCall('adminSaveMonthMenu', { days });
+    showToast('Monthly menu saved.', 'success');
+  } catch (e) { apiErrorToast(e); } finally { setBusy(btn, false); }
 }
 
 /* ----------------------------------------------------------- Approvals */

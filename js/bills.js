@@ -57,7 +57,7 @@ function renderUserBillSummary(bill) {
       <div class="stat-card"><span class="stat-card__label">Pending review</span><span class="stat-card__value">${money(bill.pendingClaims, bill.currency)}</span></div>
       <div class="stat-card stat-card--accent"><span class="stat-card__label">Due</span><span class="stat-card__value">${money(bill.due, bill.currency)}</span></div>
     </div>
-    <button class="btn btn--primary" id="pay-open" ${bill.due <= 0 ? 'disabled' : ''}><i data-lucide="banknote"></i> Submit payment</button>`;
+    <button class="btn btn--primary section-action" id="pay-open" ${bill.due <= 0 ? 'disabled' : ''}><i data-lucide="banknote"></i> Submit payment</button>`;
   paintIcons();
   if (bill.due > 0) qs('#pay-open').addEventListener('click', () => openPaymentModal(bill));
 }

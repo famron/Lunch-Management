@@ -11,7 +11,7 @@
  * mode is saved anywhere.
  */
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbwzSpKDluHXCwwYZ0qUAsHafzOd9J8lychRwBKn56paSXAxYAHaHiuY7PiJ03RUdYLb5g/exec',
+  API_URL: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE',
   ORG_NAME: 'Our Office Lunch'
 };
 

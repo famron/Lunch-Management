@@ -1,6 +1,6 @@
 /* home.js — the calendar-driven entry & history tab */
 
-const HomeState = { year: null, monthIdx: null, daysByDate: {}, currency: '৳' };
+const HomeState = { year: null, monthIdx: null, daysByDate: {}, todayInfo: null, currency: '৳' };
 
 function buildMonthGrid(year, monthIdx) {
   const firstOfMonth = new Date(year, monthIdx, 1);
@@ -18,21 +18,24 @@ async function renderHomePage() {
   if (HomeState.year == null) { HomeState.year = now.getFullYear(); HomeState.monthIdx = now.getMonth(); }
 
   qs('#page-home').innerHTML = `
-    <div class="page-head"><h1>Home</h1><p>Book today's — or any upcoming — lunch.</p></div>
-    <div class="month-bar">
-      <button class="icon-btn" id="home-prev" aria-label="Previous month"><i data-lucide="chevron-left"></i></button>
-      <h2 id="home-month-label"></h2>
-      <button class="icon-btn" id="home-next" aria-label="Next month"><i data-lucide="chevron-right"></i></button>
-      <button class="btn btn--ghost btn--sm" id="home-today">Today</button>
-    </div>
-    <div class="calendar" id="home-calendar">
-      <div class="calendar-grid">${'<div class="cal-cell cal-cell--skeleton"></div>'.repeat(35)}</div>
-    </div>
-    <div class="legend">
-      <span><i class="legend-dot legend-dot--booked"></i> Booked</span>
-      <span><i class="legend-dot legend-dot--open"></i> Open</span>
-      <span><i class="legend-dot legend-dot--locked"></i> Locked</span>
-      <span><i class="legend-dot legend-dot--holiday"></i> Holiday</span>
+    <div class="page-head"><h1>Home</h1><p>See today's menu, book ahead, or check your history.</p></div>
+    <div class="home-layout">
+      <div class="hl-monthbar month-bar">
+        <button class="icon-btn" id="home-prev" aria-label="Previous month"><i data-lucide="chevron-left"></i></button>
+        <h2 id="home-month-label"></h2>
+        <button class="icon-btn" id="home-next" aria-label="Next month"><i data-lucide="chevron-right"></i></button>
+        <button class="btn btn--ghost btn--sm" id="home-today">Today</button>
+      </div>
+      <div class="hl-today" id="home-today-card"><div class="card today-card skeleton-block"></div></div>
+      <div class="hl-grid calendar" id="home-calendar">
+        <div class="calendar-grid">${'<div class="cal-cell cal-cell--skeleton"></div>'.repeat(35)}</div>
+      </div>
+      <div class="hl-legend legend">
+        <span><i class="legend-dot legend-dot--booked"></i> Booked</span>
+        <span><i class="legend-dot legend-dot--open"></i> Open</span>
+        <span><i class="legend-dot legend-dot--locked"></i> Locked</span>
+        <span><i class="legend-dot legend-dot--holiday"></i> Holiday</span>
+      </div>
     </div>`;
   paintIcons();
 
@@ -44,7 +47,7 @@ async function renderHomePage() {
     loadHomeMonth();
   });
 
-  await loadHomeMonth();
+  await Promise.all([loadHomeMonth(), loadTodayCard()]);
 }
 
 function shiftMonth(delta) {
@@ -65,6 +68,52 @@ async function loadHomeMonth() {
     days.forEach(d => HomeState.daysByDate[d.date] = d);
     renderCalendarGrid();
   } catch (err) { apiErrorToast(err); }
+}
+
+async function loadTodayCard() {
+  const todayStr = fmtDate(new Date());
+  try {
+    const { days, currency } = await apiCall('getCalendar', { startDate: todayStr, endDate: todayStr });
+    HomeState.todayInfo = days[0];
+    HomeState.currency = currency;
+    renderTodayCard();
+  } catch (err) { apiErrorToast(err); }
+}
+
+function renderTodayCard() {
+  const info = HomeState.todayInfo;
+  if (!info) return;
+  let body;
+  if (info.isHoliday) {
+    body = `<div class="today-card__msg"><i data-lucide="calendar-off"></i> No lunch service today — holiday.</div>`;
+  } else if (!info.menuSet) {
+    body = `<div class="today-card__msg"><i data-lucide="clock"></i> Menu not published for today yet.</div>`;
+  } else {
+    const priceShown = info.ordered ? info.amount : info.price;
+    let action;
+    if (info.ordered) {
+      action = info.locked
+        ? `<div class="locked-note"><i data-lucide="lock"></i> Booked — ${escapeHtml(lockReasonText(info.reason))}</div>`
+        : `<button class="btn btn--danger btn--full" id="today-cancel"><i data-lucide="x-circle"></i> Cancel booking</button>`;
+    } else {
+      action = info.locked
+        ? `<div class="locked-note"><i data-lucide="lock"></i> ${escapeHtml(lockReasonText(info.reason))}</div>`
+        : `<button class="btn btn--primary btn--full" id="today-book"><i data-lucide="check-circle-2"></i> Book today's lunch</button>`;
+    }
+    body = `
+      <div class="today-card__menu">${escapeHtml(info.menuText)}</div>
+      <div class="today-card__price">${money(priceShown, HomeState.currency)}</div>
+      ${action}`;
+  }
+
+  qs('#home-today-card').innerHTML = `
+    <div class="card today-card">
+      <div class="today-card__head"><i data-lucide="utensils-crossed"></i><span>Today · ${niceDate(info.date)}</span></div>
+      ${body}
+    </div>`;
+  paintIcons();
+  if (qs('#today-book')) qs('#today-book').addEventListener('click', () => submitDayEntry(info.date, 'add', { btn: qs('#today-book') }));
+  if (qs('#today-cancel')) qs('#today-cancel').addEventListener('click', () => submitDayEntry(info.date, 'cancel', { btn: qs('#today-cancel') }));
 }
 
 function renderCalendarGrid() {
@@ -90,7 +139,7 @@ function renderCalendarGrid() {
     if (info.isHoliday) indicator = '<span class="cal-cell__tag">Holiday</span>';
     else if (info.ordered) indicator = '<span class="stamp-mark" aria-hidden="true"><i data-lucide="check"></i></span>';
     else if (info.locked) indicator = '<span class="cal-cell__lock" aria-hidden="true"><i data-lucide="lock"></i></span>';
-    else indicator = `<span class="cal-cell__price">${money(info.price, HomeState.currency)}</span>`;
+    else indicator = '<span class="cal-cell__dot" aria-hidden="true"></span>';
 
     html += `
       <button type="button" class="${classes.join(' ')}" data-date="${dateStr}">
@@ -108,6 +157,7 @@ function renderCalendarGrid() {
 function lockReasonText(reason) {
   if (reason === 'cutoff') return 'The cut-off time has passed for this day.';
   if (reason === 'beyond-booking-window') return 'This date is not open for booking yet.';
+  if (reason === 'no-menu') return 'The menu for this day has not been published yet.';
   return 'This date is locked.';
 }
 
@@ -119,6 +169,8 @@ function openDayModal(dateStr) {
   let actionHtml;
   if (info.isHoliday) {
     actionHtml = `<div class="locked-note"><i data-lucide="calendar-off"></i> No lunch service — office holiday.</div>`;
+  } else if (!info.menuSet) {
+    actionHtml = `<div class="locked-note"><i data-lucide="clock"></i> ${lockReasonText('no-menu')}</div>`;
   } else if (info.ordered) {
     actionHtml = canAct
       ? `<button class="btn btn--danger btn--full" id="day-cancel"><i data-lucide="x-circle"></i> Cancel booking</button>`
@@ -134,29 +186,34 @@ function openDayModal(dateStr) {
     bodyHtml: `
       <div class="day-detail">
         <div class="day-detail__menu"><i data-lucide="utensils-crossed"></i><span>${escapeHtml(info.menuText || 'Menu not set yet')}</span></div>
-        <div class="day-detail__price">${money(info.ordered ? info.amount : info.price, HomeState.currency)}</div>
+        ${info.menuSet ? `<div class="day-detail__price">${money(info.ordered ? info.amount : info.price, HomeState.currency)}</div>` : ''}
         ${actionHtml}
       </div>`
   });
 
-  if (qs('#day-book')) qs('#day-book').addEventListener('click', () => submitDayEntry(dateStr, 'add'));
-  if (qs('#day-cancel')) qs('#day-cancel').addEventListener('click', () => submitDayEntry(dateStr, 'cancel'));
+  if (qs('#day-book')) qs('#day-book').addEventListener('click', () => submitDayEntry(dateStr, 'add', { btn: qs('#day-book'), closeModalAfter: true }));
+  if (qs('#day-cancel')) qs('#day-cancel').addEventListener('click', () => submitDayEntry(dateStr, 'cancel', { btn: qs('#day-cancel'), closeModalAfter: true }));
 }
 
-async function submitDayEntry(dateStr, action) {
-  const btn = qs('#day-book') || qs('#day-cancel');
-  if (btn) setBusy(btn, true);
+async function submitDayEntry(dateStr, intent, opts) {
+  opts = opts || {};
+  if (opts.btn) setBusy(opts.btn, true);
   try {
-    const res = await apiCall('setEntry', { date: dateStr, action });
-    HomeState.daysByDate[dateStr].ordered = (action === 'add');
-    if (action === 'add') HomeState.daysByDate[dateStr].amount = res.amount;
-    closeModal();
-    renderCalendarGrid();
-    if (action === 'add') { flashBookedStamp(dateStr); showToast(res.message, 'success'); }
-    else showToast(res.message, 'info');
+    const res = await apiCall('setEntry', { date: dateStr, intent: intent });
+
+    if (HomeState.daysByDate[dateStr]) {
+      HomeState.daysByDate[dateStr].ordered = (intent === 'add');
+      if (intent === 'add') HomeState.daysByDate[dateStr].amount = res.amount;
+      renderCalendarGrid();
+      if (intent === 'add') flashBookedStamp(dateStr);
+    }
+    if (opts.closeModalAfter) closeModal();
+    if (dateStr === fmtDate(new Date())) await loadTodayCard();
+
+    showToast(res.message, intent === 'add' ? 'success' : 'info');
   } catch (err) {
     apiErrorToast(err);
-    if (btn) setBusy(btn, false);
+    if (opts.btn) setBusy(opts.btn, false);
   }
 }
 

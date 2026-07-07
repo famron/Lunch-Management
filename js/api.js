@@ -13,7 +13,11 @@ async function apiCall(action, payload) {
     return demoApiCall(action, payload);
   }
 
-  const body = Object.assign({ action: action, token: SessionStore.token }, payload);
+  // action/token are applied LAST so they can never be silently overwritten
+  // by a same-named field in payload (this exact collision — a payload
+  // "action" field clobbering the routing "action" — caused the
+  // "Unknown action: add" bug; see js/home.js's use of "intent" instead).
+  const body = Object.assign({}, payload, { action: action, token: SessionStore.token });
   let res;
   try {
     res = await fetch(CONFIG.API_URL, {
@@ -40,6 +44,14 @@ async function apiCall(action, payload) {
 const DemoDB = (function buildDemoDb() {
   const today = new Date();
   const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const sampleMeals = [
+    { menuText: 'Chicken Biryani', price: 90 },
+    { menuText: 'Beef Bhuna & Rice', price: 100 },
+    { menuText: 'Fish Curry & Rice', price: 85 },
+    { menuText: 'Mixed Vegetable & Rice', price: 70 },
+    { menuText: 'Chicken Rezala & Rice', price: 95 },
+    { menuText: 'Egg Curry & Rice', price: 65 }
+  ];
 
   const db = {
     role: 'User',
@@ -52,16 +64,7 @@ const DemoDB = (function buildDemoDb() {
       CurrencySymbol: '৳',
       Currency: 'BDT'
     },
-    menuTemplate: {
-      Sunday: { menuText: 'Chicken Biryani', price: 90 },
-      Monday: { menuText: 'Beef Bhuna & Rice', price: 100 },
-      Tuesday: { menuText: 'Fish Curry & Rice', price: 85 },
-      Wednesday: { menuText: 'Mixed Vegetable & Rice', price: 70 },
-      Thursday: { menuText: 'Chicken Rezala & Rice', price: 95 },
-      Friday: { menuText: '—', price: 0 },
-      Saturday: { menuText: '—', price: 0 }
-    },
-    overrides: {},
+    overrides: {},  // dateStr -> { menuText, price, isHoliday, note } — this IS the menu, set per date
     orders: {},     // key `${userId}__${date}` -> { menuText, price, modality, status }
     payments: [],
     users: [
@@ -72,12 +75,27 @@ const DemoDB = (function buildDemoDb() {
     ]
   };
 
+  // Seed a realistic day-by-day menu for this whole month and a chunk of next
+  // month, the way an admin would actually fill it in — one row per date, a
+  // rotating sample meal with a slightly varying price, skipping weekly holidays.
+  const weeklyHolidays = String(db.settings.WeeklyHolidays).split(',').map(s => s.trim());
+  const seedStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const seedEnd = new Date(today.getFullYear(), today.getMonth() + 1, 20);
+  let mi = 0;
+  for (let d = new Date(seedStart); d <= seedEnd; d = addDaysLocal(d, 1)) {
+    const wd = WEEKDAYS[d.getDay()];
+    if (weeklyHolidays.indexOf(wd) !== -1) continue;
+    const meal = sampleMeals[mi % sampleMeals.length];
+    mi++;
+    db.overrides[fmtDate(d)] = { menuText: meal.menuText, price: meal.price + (mi % 3 === 0 ? 10 : 0), isHoliday: false, note: '' };
+  }
+
   // Seed a few realistic past bookings for "You" and other demo users this month.
   for (let i = 1; i <= 18; i++) {
     const d = addDaysLocal(new Date(today.getFullYear(), today.getMonth(), 1), i - 1);
     if (d > today) break;
     const info = computeDayInfoDemo(fmtDate(d), db);
-    if (info.isHoliday || Math.random() < 0.15) continue;
+    if (info.isHoliday || !info.menuSet || Math.random() < 0.15) continue;
     db.orders[`U-DEMO-1__${info.date}`] = { menuText: info.menuText, price: info.price, modality: 'Canteen', status: 'Active' };
     if (Math.random() < 0.8) db.orders[`U-DEMO-2__${info.date}`] = { menuText: info.menuText, price: info.price, modality: 'Parcel', status: 'Active' };
     if (Math.random() < 0.6) db.orders[`U-DEMO-3__${info.date}`] = { menuText: info.menuText, price: info.price, modality: 'Canteen', status: 'Active' };
@@ -97,17 +115,18 @@ function computeDayInfoDemo(dateStr, db) {
   const dateObj = parseDateLocal(dateStr);
   const wd = WEEKDAYS[dateObj.getDay()];
   const weeklyHolidays = String(db.settings.WeeklyHolidays || '').split(',').map(s => s.trim()).filter(Boolean);
-  const override = db.overrides[dateStr];
+  const entry = db.overrides[dateStr];
 
   let isHoliday = weeklyHolidays.indexOf(wd) !== -1;
-  let menuText = (db.menuTemplate[wd] && db.menuTemplate[wd].menuText) || '';
-  let price = (db.menuTemplate[wd] && db.menuTemplate[wd].price) || 0;
+  let menuText = '';
+  let price = 0;
 
-  if (override) {
-    if (override.isHoliday) isHoliday = true;
-    if (override.menuText) menuText = override.menuText;
-    if (override.price !== null && override.price !== undefined) price = override.price;
+  if (entry) {
+    if (entry.isHoliday) isHoliday = true;
+    if (entry.menuText) menuText = entry.menuText;
+    if (entry.price !== null && entry.price !== undefined) price = entry.price;
   }
+  const menuSet = !!(menuText && String(menuText).trim());
 
   const [hh, mm] = String(db.settings.LunchServiceTime || '13:00').split(':').map(Number);
   const serviceDateTime = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), hh || 13, mm || 0);
@@ -118,10 +137,11 @@ function computeDayInfoDemo(dateStr, db) {
   let locked = false, reason = '';
   const now = new Date();
   if (isHoliday) { locked = true; reason = 'holiday'; }
+  else if (!menuSet) { locked = true; reason = 'no-menu'; }
   else if (now > deadline) { locked = true; reason = 'cutoff'; }
   else if (maxBookable && dateObj > maxBookable) { locked = true; reason = 'beyond-booking-window'; }
 
-  return { date: dateStr, weekday: wd, isHoliday, menuText, price, deadline: deadline.toISOString(), locked, reason };
+  return { date: dateStr, weekday: wd, isHoliday, menuText, price, menuSet, deadline: deadline.toISOString(), locked, reason };
 }
 
 function demoCurrentUser() {
@@ -174,11 +194,11 @@ async function demoApiCall(action, body) {
     case 'setEntry': {
       const info = computeDayInfoDemo(body.date, db);
       if (info.locked) {
-        const msgs = { holiday: 'This day is a holiday.', cutoff: 'The cut-off time for this day has passed.', 'beyond-booking-window': 'This date is not open for booking yet.' };
+        const msgs = { holiday: 'This day is a holiday.', 'no-menu': 'The menu for this day has not been published yet.', cutoff: 'The cut-off time for this day has passed.', 'beyond-booking-window': 'This date is not open for booking yet.' };
         throw new Error(msgs[info.reason] || 'This date is locked.');
       }
       const key = `U-DEMO-1__${body.date}`;
-      if (body.action === 'cancel') {
+      if (body.intent === 'cancel') {
         delete db.orders[key];
         return { message: 'Lunch cancelled for ' + body.date + '.', ordered: false };
       }
@@ -210,15 +230,23 @@ async function demoApiCall(action, body) {
     case 'adminSaveSettings':
       Object.assign(db.settings, body.settings || {});
       return { message: 'Settings saved.' };
-    case 'adminGetMenuTemplate':
-      return { template: WEEKDAYS.map(d => ({ day: d, menuText: db.menuTemplate[d].menuText, price: db.menuTemplate[d].price })) };
-    case 'adminSaveMenuTemplate':
-      (body.template || []).forEach(it => { db.menuTemplate[it.day] = { menuText: it.menuText, price: Number(it.price) || 0 }; });
-      return { message: 'Weekly menu saved.' };
     case 'adminGetDateOverrides': {
       let rows = Object.keys(db.overrides).map(d => Object.assign({ date: d }, db.overrides[d]));
       if (body.startDate && body.endDate) rows = rows.filter(r => r.date >= body.startDate && r.date <= body.endDate);
       return { overrides: rows };
+    }
+    case 'adminSaveMonthMenu': {
+      (body.days || []).forEach(d => {
+        const hasContent = !!(d.menuText && String(d.menuText).trim()) || (d.price !== null && d.price !== undefined && d.price !== '') || !!d.isHoliday;
+        if (!hasContent) { delete db.overrides[d.date]; return; }
+        db.overrides[d.date] = {
+          menuText: d.menuText || '',
+          price: (d.price === '' || d.price == null) ? null : Number(d.price),
+          isHoliday: !!d.isHoliday,
+          note: (db.overrides[d.date] && db.overrides[d.date].note) || ''
+        };
+      });
+      return { message: 'Monthly menu saved.' };
     }
     case 'adminSaveDateOverride':
       db.overrides[body.date] = { menuText: body.menuText || '', price: (body.price === '' || body.price == null) ? null : Number(body.price), isHoliday: !!body.isHoliday, note: body.note || '' };
